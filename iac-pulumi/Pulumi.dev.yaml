@@ -1,0 +1,42 @@
+config:
+  aws:profile: dev
+  aws:region: us-east-1
+  gcp:project: dev-csye6225
+  gcp:region: us-east1
+  ENVIRONMENT: DEV
+  allocatedStorage: "20"
+  amiOwners: "483484771402"
+  bucketName: csye-6225-dev-002920595
+  cidrBlock: 10.0.0.0/16
+  dbIngressRules:
+    - cidrBlocks:
+        - 0.0.0.0/0
+      fromPort: 5432
+      protocol: tcp
+      toPort: 5432
+  dbInstanceIndentifier: csye6225
+  dbInstancePassword: postgres
+  dbInstanceUsername: csye6225
+  dbName: csye6225
+  dbParameterGroupFamily: postgres12
+  domainName: dev.apurvazawar.me
+  engine: postgres
+  engineVersion: "12"
+  instanceClass: db.t2.micro
+  instanceType: t2.micro
+  keyName: csye6225
+  lbIngressRules:
+    - cidrBlocks:
+        - 0.0.0.0/0
+      fromPort: 80
+      protocol: tcp
+      toPort: 80
+    - cidrBlocks:
+        - 0.0.0.0/0
+      fromPort: 443
+      protocol: tcp
+      toPort: 443
+  linuxUser: csye6225
+  mailgunApiKey: a934f1f6f0980afd8302d89ae4f7b02b-5d2b1caa-41a14a74
+  port: "3000"
+  subnetMask: "24"

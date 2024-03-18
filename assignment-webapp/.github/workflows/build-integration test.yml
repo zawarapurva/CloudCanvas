@@ -1,0 +1,57 @@
+name: Integration Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: ${{ secrets.DATABASE }}
+          POSTGRES_USER: ${{ secrets.DBUSER }}
+          POSTGRES_PASSWORD: ${{ secrets.DBPASSWORD }}
+          POSTGRES_PORT: ${{ secrets.DBPORT }}
+          PORT: ${{ secrets.PORT }}
+          POSTGRES_HOST: ${{ secrets.HOSTNAME }}
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: "Create env file"
+        run: |
+          touch .env
+          echo PGDATABASE=${{ secrets.DATABASE }} >> .env
+          echo PGUSER=${{ secrets.DBUSER }} >> .env
+          echo PGPASSWORD=${{ secrets.DBPASSWORD }} >> .env
+          echo POSTGRES_PORT=${{ secrets.DBPORT }} >> .env
+          echo PORT=${{ secrets.PORT }} >> .env
+          echo PGHOST=${{ secrets.HOSTNAME }} >> .env
+          echo ENVIRONMENT=${{ secrets.ENVIRONMENT }} >> .env
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: 16.x
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Integration Tests
+        run: npm test

@@ -1,0 +1,41 @@
+name: Packer Status Check CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+    branches:
+      - main
+
+jobs:
+  packer-validation:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install Packer
+      run: |
+        curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+        sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+        sudo apt-get update && sudo apt-get install packer
+
+    - name: Run Packer init
+      run: packer init ./packer-ami
+    
+    - name: Build application artifact
+      run: |
+        mkdir artifacts
+        zip -r artifacts/webapp.zip .
+
+    - name: Run Packer fmt
+      run: |
+        if ! packer fmt -check ./packer-ami; then
+          echo "Packer HCL template formatting is incorrect. Please run 'packer fmt' and push the changes."
+          exit 1
+        fi
+
+    - name: Run Packer validate
+      run: packer validate ./packer-ami

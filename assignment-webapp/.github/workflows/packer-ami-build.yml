@@ -1,0 +1,106 @@
+name: Packer AMI Build CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ami:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: "Create env file"
+        run: |
+          touch .env
+          echo PGDATABASE=${{ secrets.DATABASE }} >> .env
+          echo PGUSER=${{ secrets.DBUSER }} >> .env
+          echo PGPASSWORD=${{ secrets.DBPASSWORD }} >> .env
+          echo POSTGRES_PORT=${{ secrets.DBPORT }} >> .env
+          echo PORT=${{ secrets.PORT }} >> .env
+          echo PGHOST=${{ secrets.HOSTNAME }} >> .env
+          echo ENVIRONMENT=${{ secrets.ENVIRONMENT }} >> .env
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Build application artifact
+        run: |
+          mkdir artifacts
+          zip -r artifacts/webapp.zip . -x "*.git*"
+
+      - name: Install Packer
+        run: |
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+          sudo apt-get update && sudo apt-get install packer
+
+      - name: Run Packer init
+        run: packer init ./packer-ami
+
+      - name: Build Packer AMI
+        run: |
+          packer build --var-file=./packer-ami/variables.pkrvars.hcl ./packer-ami/test.pkr.hcl
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEMO }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEMO }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Get Latest AMI ID
+        run: | 
+          AMI_ID=$(aws ec2 describe-images --filters "Name=name,Values=debian_*" --query 'sort_by(Images, &CreationDate)[-1].ImageId')
+          echo "Latest AMI ID: $AMI_ID"
+          echo "AMI_ID=${AMI_ID}" >> $GITHUB_ENV
+
+      - name: Get Launch Template Latest Version
+        run: |
+          launch_template_name=$(aws ec2 describe-launch-templates --filters "Name=tag:Name,Values=asg_launch_config" --query 'LaunchTemplates[0].LaunchTemplateName' --output text)
+          if [ -z "$launch_template_name" ]; then
+            echo "No launch templates found."
+            exit 1
+          fi
+          echo "LAUNCH_TEMPLATE_NAME=${launch_template_name}" >> $GITHUB_ENV
+          echo $launch_template_name
+          version=$(aws ec2 describe-launch-templates --filters "Name=tag:Name,Values=asg_launch_config" --query 'LaunchTemplates[0].LatestVersionNumber' --output text)
+          echo "LAUNCH_TEMPLATE_VERSION=${version}" >> $GITHUB_ENV
+          echo $version
+          aws ec2 create-launch-template-version --launch-template-name $launch_template_name --version-description "New version with latest AMI" --source-version $version --launch-template-data "{\"ImageId\":\"${{env.AMI_ID}}\"}"
+
+      - name: Start Auto Scaling Group Instance Refresh
+        run: |
+          asg_name=$(aws autoscaling describe-auto-scaling-groups --query "AutoScalingGroups[?Tags[?Key=='Name' && Value=='webapp']].AutoScalingGroupName" --output text)
+          aws autoscaling start-instance-refresh --auto-scaling-group-name $asg_name --strategy Rolling --preferences "MinHealthyPercentage=100,InstanceWarmup=300,CheckpointDelay=300" 
+          echo "ASG_NAME=${asg_name}" >> $GITHUB_ENV
+          echo $asg_name
+
+      - name: Wait for Instance Refresh to Complete
+        run: |
+          while true; do
+            status=$(aws autoscaling describe-instance-refreshes --auto-scaling-group-name ${{env.ASG_NAME}} --query 'InstanceRefreshes[0].Status' --output text)
+            if [ "$status" == "Successful" ]; then
+              echo "Instance refresh completed successfully."
+              exit 0
+            elif [ "$status" == "Failed" ]; then
+              echo "Instance refresh failed."
+              exit 1
+            elif [ "$status" == "Cancelling" ]; then
+              echo "Instance refresh Cancelling."
+              if [ "$status" == "Cancelled" ]; then
+                echo "Instance refresh Cancelled."
+                exit 0
+              fi
+            else
+              echo "Instance refresh still in progress. Waiting..."
+              sleep 60
+            fi
+          done
